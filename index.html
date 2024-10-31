@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GerminaChat</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="container">
+        <div id="user-list">
+            <h4>Usuários Conectados:</h4>
+            <ul id="users"></ul>
+        </div>
+        <div id="chat-container">
+            <div id="messages"></div>
+            <div id="typing-notification"></div>
+            <div id="input-container">
+                <input type="text" id="message-input" placeholder="Escreva sua mensagem..." />
+                <button id="send-button">Enviar</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = new WebSocket('ws://localhost:8080');
+        const messagesContainer = document.getElementById('messages');
+        const messageInput = document.getElementById('message-input');
+        const sendButton = document.getElementById('send-button');
+        const usersContainer = document.getElementById('users');
+        const typingNotification = document.getElementById('typing-notification');
+
+        const userName = sessionStorage.getItem('userName') || 'Usuário Anônimo';
+        const showHistory = sessionStorage.getItem('showHistory') === 'true';
+        let typingTimeout;
+
+        socket.onopen = () => {
+            const loginData = {
+                type: 'name',
+                name: userName,
+                showHistory: showHistory
+            };
+            socket.send(JSON.stringify(loginData));
+            appendMessage(`Conectado ao servidor como ${userName}`);
+        };
+
+        messageInput.addEventListener('input', () => {
+            if (messageInput.value.trim() !== '') {
+                socket.send(JSON.stringify({ type: 'typing', user: userName }));
+                clearTimeout(typingTimeout);
+                typingTimeout = setTimeout(() => socket.send(JSON.stringify({ type: 'stopTyping', user: userName })), 2000);
+            }
+        });
+
+        sendButton.addEventListener('click', () => {
+            const message = messageInput.value.trim();
+            if (message) {
+                let chatMessage;
+
+                if (message.startsWith('/private')) {
+                    const [_, targetName, ...messageParts] = message.split(' ');
+                    const privateMessage = messageParts.join(' ');
+
+                    chatMessage = {
+                        type: 'private',
+                        target: targetName,
+                        message: privateMessage
+                    };
+                } else {
+                    chatMessage = {
+                        type: 'message',
+                        message: message
+                    };
+                    appendMessage(`Você: ${message}`); 
+                }
+
+                socket.send(JSON.stringify(chatMessage));
+                messageInput.value = '';
+                socket.send(JSON.stringify({ type: 'stopTyping', user: userName })); 
+            }
+        });
+
+        function appendMessage(message, isPrivate = false) {
+            const messageElement = document.createElement('div');
+            messageElement.textContent = message;
+
+            if (isPrivate) {
+                messageElement.style.color = 'green';
+                messageElement.style.fontWeight = 'bold';
+            }
+
+            messagesContainer.appendChild(messageElement);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+
+            if (data.type === 'message' || data.type === 'enter' || data.type === 'exit') {
+                appendMessage(data.message);
+            } else if (data.type === 'private') {
+                appendMessage(data.message, true);
+            } else if (data.type === 'typing') {
+                typingNotification.textContent = `${userName} está digitando...`;
+            } else if (data.type === 'stopTyping') {
+                typingNotification.textContent = '';
+            } else if (data.type === 'userList') {
+                updateUserList(data.users);
+            }
+        };
+
+        function updateUserList(users) {
+            usersContainer.innerHTML = '';
+            users.forEach(user => {
+                const userElement = document.createElement('li');
+                userElement.textContent = `${user.name} - Online há ${formatTime(user.timeOnline)}`;
+                usersContainer.appendChild(userElement);
+            });
+        }
+
+        function formatTime(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            return `${minutes}m `;
+        }
+    </script>
+</body>
+</html>
